@@ -26,6 +26,7 @@
 #define COMMAND_FAST @"n"
 #define COMMAND_LOVE @"+"
 #define COMMAND_BAN @"-"
+#define COMMAND_STOP @"S"
 
 
 @implementation PKPianobarController {
@@ -55,6 +56,9 @@
             break;
             
         case NX_KEYTYPE_REWIND:
+            [self sendDelayedCommand:COMMAND_STOP];
+            break;
+        
         default:
             break;
     }
@@ -109,6 +113,8 @@
         flashText = @"⊤";
     } else if ([command isEqualToString:COMMAND_BAN]) {
         flashText = @"⊥";
+    } else if ([command isEqualToString:COMMAND_STOP]) {
+      flashText = @"■";
     }
     
     if (flashText) {
@@ -132,6 +138,10 @@
     [handle writeData:commandData];
     [handle closeFile];
 #endif
+  
+  if ([command isEqualToString:COMMAND_STOP]) {
+    [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:2.0f];
+  }
 }
 
 
