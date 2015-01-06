@@ -25,10 +25,12 @@ static CGEventRef tapEventCallback(CGEventTapProxy proxy, CGEventType type, CGEv
 -(id)initWithDelegate:(id)delegate;
 {
 	_delegate = delegate;
-    // This was leaking memory like a sieve
-	// [self startWatchingAppSwitching];
+	[self startWatchingAppSwitching];
 	singleton = self;
 	_mediaKeyAppList = [NSMutableArray new];
+    _tapThreadRL=nil;
+    _eventPort=nil;
+    _eventPortSource=nil;
 	return self;
 }
 -(void)dealloc;
@@ -59,6 +61,9 @@ static CGEventRef tapEventCallback(CGEventTapProxy proxy, CGEventType type, CGEv
 }
 
 -(void)startWatchingMediaKeys;{
+    // Prevent having multiple mediaKeys threads
+    [self stopWatchingMediaKeys];
+    
 	[self setShouldInterceptMediaKeyEvents:YES];
 	
 	// Add an event tap to intercept the system defined media key events
@@ -79,6 +84,22 @@ static CGEventRef tapEventCallback(CGEventTapProxy proxy, CGEventType type, CGEv
 -(void)stopWatchingMediaKeys;
 {
 	// TODO<nevyn>: Shut down thread, remove event tap port and source
+    
+    if(_tapThreadRL){
+        CFRunLoopStop(_tapThreadRL);
+        _tapThreadRL=nil;
+    }
+    
+    if(_eventPort){
+        CFMachPortInvalidate(_eventPort);
+        CFRelease(_eventPort);
+        _eventPort=nil;
+    }
+    
+    if(_eventPortSource){
+        CFRelease(_eventPortSource);
+        _eventPortSource=nil;
+    }
 }
 
 #pragma mark -
@@ -86,12 +107,14 @@ static CGEventRef tapEventCallback(CGEventTapProxy proxy, CGEventType type, CGEv
 
 +(BOOL)usesGlobalMediaKeyTap
 {
-#ifdef DEBUG
+#ifdef _DEBUG
 	// breaking in gdb with a key tap inserted sometimes locks up all mouse and keyboard input forever, forcing reboot
 	return NO;
 #else
 	// XXX(nevyn): MediaKey event tap doesn't work on 10.4, feel free to figure out why if you have the energy.
-	return floor(NSAppKitVersionNumber) >= 949/*NSAppKitVersionNumber10_5*/;
+	return 
+		![[NSUserDefaults standardUserDefaults] boolForKey:kIgnoreMediaKeysDefaultsKey]
+		&& floor(NSAppKitVersionNumber) >= 949/*NSAppKitVersionNumber10_5*/;
 #endif
 }
 
@@ -110,7 +133,26 @@ static CGEventRef tapEventCallback(CGEventTapProxy proxy, CGEventType type, CGEv
 		@"com.plexsquared.Plex",
 		@"com.soundcloud.desktop",
 		@"org.niltsh.MPlayerX",
+		@"com.ilabs.PandorasHelper",
+		@"com.mahasoftware.pandabar",
+		@"com.bitcartel.pandorajam",
+		@"org.clementine-player.clementine",
+		@"fm.last.Last.fm",
+		@"fm.last.Scrobbler",
+		@"com.beatport.BeatportPro",
+		@"com.Timenut.SongKey",
 		@"com.macromedia.fireworks", // the tap messes up their mouse input
+		@"at.justp.Theremin",
+		@"ru.ya.themblsha.YandexMusic",
+		@"com.jriver.MediaCenter18",
+		@"com.jriver.MediaCenter19",
+		@"com.jriver.MediaCenter20",
+		@"co.rackit.mate",
+		@"com.ttitt.b-music",
+		@"com.beardedspice.BeardedSpice",
+		@"com.plug.Plug",
+		@"com.plug.Plug2",
+    @"com.netease.163music",
 		nil
 	];
 }
@@ -176,7 +218,7 @@ static CGEventRef tapEventCallback2(CGEventTapProxy proxy, CGEventType type, CGE
 		return event;
 
 	int keyCode = (([nsEvent data1] & 0xFFFF0000) >> 16);
-	if (keyCode != NX_KEYTYPE_PLAY && keyCode != NX_KEYTYPE_FAST && keyCode != NX_KEYTYPE_REWIND)
+    if (keyCode != NX_KEYTYPE_PLAY && keyCode != NX_KEYTYPE_FAST && keyCode != NX_KEYTYPE_REWIND && keyCode != NX_KEYTYPE_PREVIOUS && keyCode != NX_KEYTYPE_NEXT)
 		return event;
 
 	if (![self shouldInterceptMediaKeyEvents])
@@ -215,6 +257,8 @@ static CGEventRef tapEventCallback(CGEventTapProxy proxy, CGEventType type, CGEv
 #pragma mark Task switching callbacks
 
 NSString *kMediaKeyUsingBundleIdentifiersDefaultsKey = @"SPApplicationsNeedingMediaKeys";
+NSString *kIgnoreMediaKeysDefaultsKey = @"SPIgnoreMediaKeys";
+
 
 
 -(void)mediaKeyAppListChanged;
